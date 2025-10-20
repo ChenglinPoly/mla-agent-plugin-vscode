@@ -1,0 +1,103 @@
+{
+  "name": "mla-chatbot",
+  "displayName": "MLA Chatbot",
+  "description": "VS Code 集成的 MLA Agent 聊天助手",
+  "version": "0.1.0",
+  "publisher": "mla",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "mla.openChat",
+        "title": "MLA: 打开聊天面板"
+      },
+      {
+        "command": "mla.clearHistory",
+        "title": "MLA: 清除历史记录"
+      },
+      {
+        "command": "mla.testConnection",
+        "title": "MLA: 测试 LLM 连接"
+      }
+    ],
+    "viewsContainers": {
+      "panel": [
+        {
+          "id": "mla-chatbot",
+          "title": "MLA Chatbot",
+          "icon": "resources/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "mla-chatbot": [
+        {
+          "type": "webview",
+          "id": "mla.chatView",
+          "name": "MLA 对话"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "MLA Chatbot",
+      "properties": {
+        "mla.autoStartToolServer": {
+          "type": "boolean",
+          "default": true,
+          "description": "自动启动 mla-tool-server"
+        },
+        "mla.defaultAgentName": {
+          "type": "string",
+          "default": "writing_agent",
+          "description": "默认 Agent 名称"
+        },
+        "mla.jsonl.defaultExpanded": {
+          "type": "boolean",
+          "default": true,
+          "description": "JSONL 执行区块默认展开"
+        },
+        "mla.history.maxMessages": {
+          "type": "number",
+          "default": 200,
+          "description": "最大历史消息数"
+        },
+        "mla.toolMeta.maxInputChars": {
+          "type": "number",
+          "default": 512,
+          "description": "tool_meta input 最大字符数"
+        },
+        "mla.toolMeta.maxResultChars": {
+          "type": "number",
+          "default": 1024,
+          "description": "tool_meta result 最大字符数"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "@types/vscode": "^1.80.0",
+    "@typescript-eslint/eslint-plugin": "^5.0.0",
+    "@typescript-eslint/parser": "^5.0.0",
+    "eslint": "^8.0.0",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {}
+}
+
