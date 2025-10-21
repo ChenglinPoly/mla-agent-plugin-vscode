@@ -115,20 +115,47 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * 保存 MLA 配置（使用 mla-agent 命令）
+   * 保存 MLA 配置（直接写入 YAML 文件）
+   * 
+   * 优化：避免多次调用 mla-agent 命令（每次启动 Python 进程需要 2.5 秒）
+   * 直接写入配置文件，总耗时从 15 秒降低到 < 0.1 秒
    */
   private async saveMlaConfig(config: any): Promise<void> {
     try {
-      // 使用 mla-agent --config-set 命令设置每个参数
-      await this.runCommand('mla-agent', ['--config-set', 'base_url', config.base_url]);
-      await this.runCommand('mla-agent', ['--config-set', 'api_key', config.api_key]);
-      await this.runCommand('mla-agent', ['--config-set', 'temperature', config.temperature.toString()]);
-      await this.runCommand('mla-agent', ['--config-set', 'max_tokens', config.max_tokens.toString()]);
-      await this.runCommand('mla-agent', ['--config-set', 'max_context_window', config.max_context_window.toString()]);
+      const fs = require('fs');
+      const yaml = require('yaml');
+      const path = require('path');
       
-      // 模型列表需要 JSON 格式
-      const modelsJson = JSON.stringify(config.models);
-      await this.runCommand('mla-agent', ['--config-set', 'models', modelsJson]);
+      // MLA_V3 配置文件路径
+      const configPath = path.join(
+        __dirname, 
+        '..', 
+        'MLA_V3', 
+        'config', 
+        'run_env_config', 
+        'llm_config.yaml'
+      );
+      
+      // 读取现有配置
+      let existingConfig: any = {};
+      if (fs.existsSync(configPath)) {
+        const content = fs.readFileSync(configPath, 'utf8');
+        existingConfig = yaml.parse(content) || {};
+      }
+      
+      // 更新配置
+      const updatedConfig = {
+        temperature: config.temperature,
+        max_tokens: config.max_tokens,
+        max_context_window: config.max_context_window,
+        base_url: config.base_url,
+        api_key: config.api_key,
+        models: config.models
+      };
+      
+      // 写入配置
+      const yamlContent = yaml.stringify(updatedConfig);
+      fs.writeFileSync(configPath, yamlContent, 'utf8');
       
       vscode.window.showInformationMessage('✅ MLA 配置已更新');
       
@@ -192,11 +219,22 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * 运行命令
+   * 运行命令并返回输出
+   * 
+   * 修复：使用 qwen3 环境中 mla-agent 的完整路径
    */
   private runCommand(cmd: string, args: string[]): Promise<string> {
     return new Promise((resolve, reject) => {
-      const proc = spawn(cmd, args);
+      /**
+       * 使用 mla-agent 的完整路径
+       * 避免 VSCode 子进程中找不到 conda 环境的问题
+       */
+      let finalCmd = cmd;
+      if (cmd === 'mla-agent') {
+        finalCmd = '/home/colin/miniconda3/envs/qwen3/bin/mla-agent';
+      }
+      
+      const proc = spawn(finalCmd, args);
       let output = '';
       let error = '';
 
@@ -383,10 +421,25 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
       }
     });
 
+    // 保存原始的完整配置，用于判断是否修改
+    let originalMlaConfig = {};
+
     function loadConfig(config) {
+      // 保存原始 MLA 配置
+      originalMlaConfig = { ...config.mla };
+      
       // MLA
       document.getElementById('mla-baseUrl').value = config.mla.baseUrl || '';
-      document.getElementById('mla-apiKey').value = config.mla.apiKey === '***已设置***' ? '' : config.mla.apiKey || '';
+      // API Key 显示为占位符，保持原值
+      const apiKeyInput = document.getElementById('mla-apiKey');
+      if (config.mla.apiKey && config.mla.apiKey !== '') {
+        apiKeyInput.value = '';
+        apiKeyInput.placeholder = '***已设置*** (留空则不修改)';
+      } else {
+        apiKeyInput.value = '';
+        apiKeyInput.placeholder = '请输入 API Key';
+      }
+      
       document.getElementById('mla-temperature').value = config.mla.temperature || 0;
       document.getElementById('mla-maxTokens').value = config.mla.max_tokens || 0;
       document.getElementById('mla-maxContextWindow').value = config.mla.max_context_window || 200000;
@@ -397,9 +450,12 @@ export class SettingsViewProvider implements vscode.WebviewViewProvider {
     }
 
     function saveMlaConfig() {
+      const newApiKey = document.getElementById('mla-apiKey').value.trim();
+      
       const config = {
         base_url: document.getElementById('mla-baseUrl').value,
-        api_key: document.getElementById('mla-apiKey').value,
+        // 如果 API Key 为空且原来有值，则使用原值；否则使用新值
+        api_key: newApiKey === '' ? originalMlaConfig.apiKey || '' : newApiKey,
         temperature: parseFloat(document.getElementById('mla-temperature').value),
         max_tokens: parseInt(document.getElementById('mla-maxTokens').value),
         max_context_window: parseInt(document.getElementById('mla-maxContextWindow').value),

@@ -628,9 +628,13 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
   private async confirmHIL(hilId: string, result: string): Promise<void> {
     console.log(`[confirmHIL] HIL ID: ${hilId}, 结果: ${result}`);
     
-    // 使用 child_process spawn 调用 mla-agent confirm
+    /**
+     * 使用 qwen3 环境中 mla-agent 的完整路径
+     * 避免 VSCode 子进程中找不到 conda 环境的问题
+     */
     const { spawn } = require('child_process');
-    const proc = spawn('mla-agent', ['confirm', hilId, '--result', result]);
+    const mlaAgentPath = '/home/colin/miniconda3/envs/qwen3/bin/mla-agent';
+    const proc = spawn(mlaAgentPath, ['confirm', hilId, '--result', result]);
     
     proc.on('close', (code: number) => {
       if (code === 0) {

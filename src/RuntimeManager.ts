@@ -55,7 +55,13 @@ export class RuntimeManager {
     this.setState('M_RUNNING');
 
     try {
-      this.process = spawn('mla-agent', args, {
+      /**
+       * 使用 qwen3 环境中 mla-agent 的完整路径
+       * 避免 VSCode 子进程中找不到 conda 环境的问题
+       */
+      const mlaAgentPath = '/home/colin/miniconda3/envs/qwen3/bin/mla-agent';
+      
+      this.process = spawn(mlaAgentPath, args, {
         cwd: params.taskId,
         env: process.env
       });
