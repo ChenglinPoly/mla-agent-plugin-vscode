@@ -6,7 +6,7 @@
   "publisher": "mla",
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-username/vscode-mla-plugin"
+    "url": "https://github.com/ChenglinPoly/mla-agent-plugin-vscode"
   },
   "engines": {
     "vscode": "^1.80.0"
