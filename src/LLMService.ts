@@ -20,10 +20,9 @@ interface LLMConfig {
 export class LLMService {
   private config?: LLMConfig;
   private systemPrompt = `你是 MLA Chatbot，一个集成在 VS Code 中的 AI 科研助手。
-
 ## 你的能力
 
-1. **直接回答**：一般性问题、咨询、解释概念等
+1. **直接回答**：一般性问题、咨询、解释概念等（任何任务都应该真实的调用agent 进行!）
 2. **调用 MLA Agent**：执行具体任务（文件操作、代码编写、论文写作、数据分析等）
 
 ## 可用的 MLA Agents
@@ -39,7 +38,7 @@ export class LLMService {
 
 ### get_idea_and_experiment_plan（实验设计）
 - **职责**：生成研究方向和实验方案
-- **适用场景**：实验规划、研究设计
+- **适用场景**：实验规划、研究设计、用户探讨研究想法时（基于已经通过data_collection_agent手收集了部分资料或者用户提供资料）
 
 ### coder_agent（代码实现）
 - **职责**：完成编程和实验代码
@@ -59,22 +58,26 @@ export class LLMService {
 直接回答，不添加任何标记。
 
 ### 如果需要调用 MLA Agent
-使用 XML 标签（用 < 和 > 字符）：
+先输出你对用户的回复，然后使用 XML 标签调用：
 
-开始标签 mla_call
-然后 response 标签包含你的回复文本
-然后 action 标签内容为 CALL_MLA
-然后 agent_name 标签包含选择的 agent 名称
-然后 refined_input 标签包含优化后的任务描述
-最后结束标签 mla_call
-
-示例格式（用 <> 包围标签名）：
 <mla_call>
-  <response>我将帮您查看文件列表</response>
+  <action>CALL_MLA</action>
+  <agent_name>选择的agent名称</agent_name>
+  <refined_input>优化后的任务描述</refined_input>
+</mla_call>
+
+示例：
+我将帮您查看文件列表。
+<mla_call>
   <action>CALL_MLA</action>
   <agent_name>writing_agent</agent_name>
-  <refined_input>查看当前目录的所有文件和子目录</refined_input>
+  <refined_input>查看当前目录的所有文件和子目录，列出详细信息</refined_input>
 </mla_call>
+
+注意：
+- XML 前面的文本会显示给用户
+- 不需要 <response> 标签（直接在 XML 前面写）
+- <refined_input> 可以基于历史优化任务描述
 
 **重要**：
 - 每次 MLA 执行完成后，你会收到结果反馈
@@ -135,7 +138,11 @@ export class LLMService {
           }
         } else if (inModelsSection && trimmedLine.startsWith('-')) {
           // YAML 多行列表项
-          const modelName = trimmedLine.substring(1).trim();
+          let modelName = trimmedLine.substring(1).trim();
+          // 清理所有引号和转义
+          modelName = modelName.replace(/^["']+|["']+$/g, '');  // 移除首尾引号
+          modelName = modelName.replace(/\\"/g, '');  // 移除转义的引号
+          modelName = modelName.replace(/\\\\/g, '');  // 移除反斜杠
           if (modelName) {
             models.push(modelName);
           }
@@ -169,6 +176,8 @@ export class LLMService {
           return model;
         });
       }
+      
+      this.outputChannel.appendLine(`[LLM] 解析后的模型列表: ${JSON.stringify(config.models)}`);
 
       if (config.base_url && config.api_key) {
         this.config = config as LLMConfig;
@@ -191,6 +200,14 @@ export class LLMService {
       return;
     }
 
+    // 检查是否有用户自定义的模型
+    const customModel = (await import('vscode')).workspace.getConfiguration('mla').get('chatbot.model', '');
+    const useModel = customModel || this.config.models[0];
+    
+    // 检查是否有用户自定义的温度
+    const customTemp = (await import('vscode')).workspace.getConfiguration('mla').get('chatbot.temperature');
+    const useTemperature = customTemp !== undefined ? customTemp : this.config.temperature;
+
     const fullMessages = [
       { role: 'system', content: this.systemPrompt },
       ...messages
@@ -209,13 +226,16 @@ export class LLMService {
     }
 
     this.outputChannel.appendLine(`[LLM] 调用 API: ${apiUrl}`);
-    this.outputChannel.appendLine(`[LLM] 模型: ${this.config.models[0]}`);
+    this.outputChannel.appendLine(`[LLM] 模型: ${useModel}`);
+    this.outputChannel.appendLine(`[LLM] 温度: ${useTemperature}`);
+
+    let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 
     try {
       const requestBody = {
-        model: this.config.models[0],
+        model: useModel,
         messages: fullMessages,
-        temperature: this.config.temperature,
+        temperature: useTemperature,
         stream: true
       };
 
@@ -239,7 +259,7 @@ export class LLMService {
         return;
       }
 
-      const reader = response.body?.getReader();
+      reader = response.body?.getReader();
       if (!reader) {
         yield '⚠️ 无法读取响应流';
         return;
@@ -283,9 +303,23 @@ export class LLMService {
       this.outputChannel.appendLine(`[LLM] 流式响应完成`);
 
     } catch (error: any) {
-      this.outputChannel.appendLine(`[LLM] 调用异常: ${error.message}`);
-      this.outputChannel.appendLine(`[LLM] 堆栈: ${error.stack}`);
-      yield `⚠️ LLM 调用错误: ${error.message}`;
+      // 捕获 terminated 错误，静默处理
+      if (error.message === 'terminated' || error.name === 'AbortError') {
+        this.outputChannel.appendLine(`[LLM] 流被终止（正常情况）`);
+      } else {
+        this.outputChannel.appendLine(`[LLM] 调用异常: ${error.message}`);
+        this.outputChannel.appendLine(`[LLM] 堆栈: ${error.stack}`);
+        yield `⚠️ LLM 调用错误: ${error.message}`;
+      }
+    } finally {
+      // 确保清理 reader
+      if (reader) {
+        try {
+          reader.releaseLock();
+        } catch {
+          // 忽略释放错误
+        }
+      }
     }
   }
 
@@ -366,23 +400,24 @@ export class LLMService {
         const xmlContent = mlaCallMatch[1];
         
         // 提取各个字段
-        const responseMatch = xmlContent.match(/<response>([\s\S]*?)<\/response>/);
         const actionMatch = xmlContent.match(/<action>([\s\S]*?)<\/action>/);
         const agentNameMatch = xmlContent.match(/<agent_name>([\s\S]*?)<\/agent_name>/);
         const refinedInputMatch = xmlContent.match(/<refined_input>([\s\S]*?)<\/refined_input>/);
         
         if (actionMatch && actionMatch[1].trim() === 'CALL_MLA') {
-          const displayText = responseMatch ? responseMatch[1].trim() : '正在调用 MLA Agent...';
           const agentName = agentNameMatch ? agentNameMatch[1].trim() : 'writing_agent';
           const refinedInput = refinedInputMatch ? refinedInputMatch[1].trim() : '';
           
+          // displayText 是去掉 XML 后的内容（包含 XML 前面的文本）
+          const displayText = response.replace(/<mla_call>[\s\S]*?<\/mla_call>/g, '').trim();
+          
           this.outputChannel.appendLine(`[LLM] 检测到 MLA 调用`);
           this.outputChannel.appendLine(`[LLM] Agent: ${agentName}`);
-          this.outputChannel.appendLine(`[LLM] Response: ${displayText}`);
+          this.outputChannel.appendLine(`[LLM] DisplayText: ${displayText}`);
           
           return {
             shouldCallMLA: true,
-            displayText,
+            displayText,  // 返回 XML 外面的文本
             agentName,
             refinedInput
           };
@@ -393,16 +428,9 @@ export class LLMService {
     }
     
     // 没有检测到 MLA 调用，当作普通回复
-    // 但需要去掉可能残留的 XML 标签
-    let cleanResponse = response;
-    if (mlaCallMatch) {
-      // 如果有 mla_call 标签但解析失败，移除整个标签
-      cleanResponse = response.replace(/<mla_call>[\s\S]*?<\/mla_call>/, '').trim();
-    }
-    
     return {
       shouldCallMLA: false,
-      displayText: cleanResponse || response
+      displayText: response
     };
   }
 

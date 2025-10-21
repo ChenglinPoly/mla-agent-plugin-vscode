@@ -102,9 +102,16 @@ export class RuntimeManager {
     }
 
     this.outputChannel.appendLine('[RuntimeManager] 续跑任务');
+    this.outputChannel.appendLine(`[RuntimeManager] 使用参数: task_id=${this.currentSnapshot.task_id}, input=${this.currentSnapshot.input}`);
     
     // 清理旧进程
     this.cleanup();
+    
+    // 发送续跑标记事件
+    this.onEventEmitter.fire({
+      type: 'resume_marker',
+      text: '--- 续跑开始 ---'
+    });
 
     // 用完全一致的参数重新启动
     await this.startAgent({

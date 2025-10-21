@@ -4,12 +4,14 @@ import { RuntimeManager } from './RuntimeManager';
 import { Orchestrator } from './Orchestrator';
 import { LLMService } from './LLMService';
 import { ChatViewProvider } from './ChatViewProvider';
+import { SettingsViewProvider } from './SettingsViewProvider';
 
 let outputChannel: vscode.OutputChannel;
 let runtimeManager: RuntimeManager;
 let orchestrator: Orchestrator;
 let llmService: LLMService;
 let chatViewProvider: ChatViewProvider;
+let settingsViewProvider: SettingsViewProvider;
 
 /**
  * 扩展激活
@@ -31,12 +33,20 @@ export function activate(context: vscode.ExtensionContext) {
     orchestrator,
     llmService
   );
+  settingsViewProvider = new SettingsViewProvider(context.extensionUri);
 
   // 注册 Webview Provider
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(
       'mla.chatView',
       chatViewProvider
+    )
+  );
+
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      'mla.settingsView',
+      settingsViewProvider
     )
   );
 
@@ -63,6 +73,13 @@ export function activate(context: vscode.ExtensionContext) {
       } else {
         vscode.window.showErrorMessage(`❌ ${result.message}`);
       }
+    })
+  );
+
+  // 打开设置
+  context.subscriptions.push(
+    vscode.commands.registerCommand('mla.openSettings', () => {
+      vscode.commands.executeCommand('mla.settingsView.focus');
     })
   );
 

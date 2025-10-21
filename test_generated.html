@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body>
+<script>
+// 模拟 VS Code API
+function acquireVsCodeApi() {
+  return {
+    postMessage: function(msg) {
+      console.log('[Mock] postMessage:', msg.type);
+    },
+    setState: function(state) {},
+    getState: function() { return null; }
+  };
+}
+
+// 从 generated_webview.html 复制 script 部分
+const vscode = acquireVsCodeApi();
+console.log('✅ vscode API 已模拟');
+
+// 测试关键函数
+function renderMarkdown(text) {
+  if (!text) return '';
+  
+  let html = text;
+  const tempDiv = document.createElement('div');
+  tempDiv.textContent = html;
+  html = tempDiv.innerHTML;
+  
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  
+  const backtickRegex = /`([^`]+)`/g;
+  html = html.replace(backtickRegex, '<code>$1</code>');
+  
+  html = html.replace(/\n/g, '<br>');
+  
+  return html;
+}
+
+// 测试
+const test1 = renderMarkdown('这是**粗体**和`代码`测试');
+console.log('测试1结果:', test1);
+
+const test2 = '我将帮您\n<mla_call>\n<response>处理</response>\n</mla_call>';
+console.log('测试2原始:', test2);
+
+// 移除 XML
+const startTag = '<mla_call>';
+const endTag = '</mla_call>';
+let cleaned = test2;
+let startIdx = cleaned.indexOf(startTag);
+while (startIdx !== -1) {
+  const endIdx = cleaned.indexOf(endTag, startIdx);
+  if (endIdx !== -1) {
+    cleaned = cleaned.substring(0, startIdx) + cleaned.substring(endIdx + endTag.length);
+    startIdx = cleaned.indexOf(startTag);
+  } else {
+    break;
+  }
+}
+console.log('测试2去XML:', cleaned);
+console.log('测试2渲染:', renderMarkdown(cleaned));
+
+console.log('✅ 所有测试完成，无语法错误');
+</script>
+</body>
+</html>

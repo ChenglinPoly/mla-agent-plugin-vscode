@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      font-family: var(--vscode-font-family);
+      color: var(--vscode-foreground);
+      background: var(--vscode-editor-background);
+    }
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 10px;
+    }
+    .message {
+      margin-bottom: 15px;
+      padding: 10px;
+      border-radius: 5px;
+    }
+    .message.user {
+      background: var(--vscode-input-background);
+      border-left: 3px solid var(--vscode-terminal-ansiBlue);
+    }
+    .message.assistant {
+      background: transparent;
+      padding-left: 0;
+    }
+    .message .role {
+      font-weight: bold;
+      margin-bottom: 8px;
+      font-size: 0.9em;
+      opacity: 0.8;
+    }
+    .message .content {
+      line-height: 1.6;
+    }
+    .message.assistant .content {
+      color: var(--vscode-foreground);
+    }
+    /* Markdown 样式 */
+    .message .content h1, .message .content h2, .message .content h3 {
+      margin-top: 0.5em;
+      margin-bottom: 0.5em;
+    }
+    .message .content code {
+      background: var(--vscode-textCodeBlock-background);
+      padding: 2px 4px;
+      border-radius: 3px;
+      font-family: var(--vscode-editor-font-family);
+    }
+    .message .content pre {
+      background: var(--vscode-textCodeBlock-background);
+      padding: 10px;
+      border-radius: 5px;
+      overflow-x: auto;
+    }
+    .message .content ul, .message .content ol {
+      margin-left: 1.5em;
+    }
+    .message .content blockquote {
+      border-left: 3px solid var(--vscode-terminal-ansiCyan);
+      padding-left: 10px;
+      margin-left: 0;
+      opacity: 0.8;
+    }
+    .xml-hidden {
+      display: none;
+    }
+    .jsonl-block {
+      margin: 10px 0;
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 5px;
+      overflow: hidden;
+    }
+    .jsonl-header {
+      background: var(--vscode-panel-background);
+      padding: 8px 12px;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .jsonl-header:hover {
+      background: var(--vscode-list-hoverBackground);
+    }
+    .jsonl-content {
+      padding: 10px;
+      max-height: 300px;
+      overflow-y: auto;
+      font-family: var(--vscode-editor-font-family);
+      font-size: 0.9em;
+      background: var(--vscode-editor-background);
+      position: relative;
+    }
+    .jsonl-event {
+      margin-bottom: 5px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .jsonl-event.token {
+      color: var(--vscode-foreground);
+    }
+    .jsonl-event.progress {
+      color: var(--vscode-terminal-ansiBlue);
+    }
+    .jsonl-event.error {
+      color: var(--vscode-errorForeground);
+    }
+    .jsonl-event.warn {
+      color: var(--vscode-terminal-ansiYellow);
+    }
+    #input-container {
+      display: flex;
+      gap: 8px;
+      padding: 12px;
+      background: var(--vscode-editor-background);
+      border-top: 1px solid var(--vscode-panel-border);
+      position: sticky;
+      bottom: 0;
+      align-items: center;
+    }
+    #input {
+      flex: 1;
+      padding: 10px 12px;
+      background: var(--vscode-input-background);
+      color: var(--vscode-input-foreground);
+      border: 1px solid var(--vscode-input-border);
+      border-radius: 6px;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    #input:focus {
+      border-color: var(--vscode-focusBorder);
+    }
+    button {
+      padding: 10px 20px;
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.2s;
+      white-space: nowrap;
+    }
+    button:hover {
+      background: var(--vscode-button-hoverBackground);
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    }
+    button:active {
+      transform: translateY(0);
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+    button.secondary {
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+    }
+    button.secondary:hover {
+      background: var(--vscode-button-secondaryHoverBackground);
+    }
+    .status-badge {
+      padding: 2px 8px;
+      border-radius: 3px;
+      font-size: 0.8em;
+    }
+    .status-running { background: var(--vscode-terminal-ansiBlue); }
+    .status-completed { background: var(--vscode-terminal-ansiGreen); }
+    .status-paused { background: var(--vscode-terminal-ansiYellow); }
+    .status-error { background: var(--vscode-errorForeground); }
+  </style>
+</head>
+<body>
+  <div id="messages"></div>
+  <div id="input-container">
+    <input type="text" id="input" placeholder="输入消息..." />
+    <button id="send">发送</button>
+    <button id="pause" class="secondary" style="display:none;">⏸ 暂停</button>
+    <button id="resume" style="display:none;">▶️ 继续</button>
+    <button id="stop" class="secondary" style="display:none;">⏹ 停止</button>
+  </div>
+
+  <script>
+    const vscode = acquireVsCodeApi();
+    const messagesDiv = document.getElementById('messages');
+    const input = document.getElementById('input');
+    const sendBtn = document.getElementById('send');
+    const pauseBtn = document.getElementById('pause');
+    const resumeBtn = document.getElementById('resume');
+    const stopBtn = document.getElementById('stop');
+
+    let currentJSONLBlocks = {};
+    let currentState = 'IDLE';  // 跟踪当前状态
+
+    // 发送消息
+    sendBtn.onclick = () => {
+      const text = input.value.trim();
+      if (text) {
+        vscode.postMessage({ type: 'send', text });
+        input.value = '';
+      }
+    };
+
+    input.onkeypress = (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendBtn.click();
+      }
+    };
+
+    pauseBtn.onclick = () => vscode.postMessage({ type: 'pause' });
+    resumeBtn.onclick = () => vscode.postMessage({ type: 'resume' });
+    stopBtn.onclick = () => vscode.postMessage({ type: 'stop' });
+
+    // 接收消息
+    window.addEventListener('message', event => {
+      const data = event.data;
+      
+      console.log('[Webview] 收到消息类型:', data.type);
+      
+      switch (data.type) {
+        case 'message':
+          appendMessage(data.message);
+          break;
+        case 'assistantStart':
+          startAssistantMessage(data.id);
+          break;
+        case 'assistantChunk':
+          updateAssistantMessage(data.id, data.content);
+          break;
+        case 'jsonlBlock':
+          appendJSONLBlock(data.block);
+          break;
+        case 'jsonlEvent':
+          updateJSONLEvent(data.callId, data.event);
+          break;
+        case 'updateJSONLBlock':
+          updateJSONLBlockStatus(data.block);
+          break;
+        case 'history':
+          console.log('[Webview] 调用 loadHistory, 消息数:', data.messages?.length);
+          loadHistory(data.messages);
+          break;
+        case 'updateState':
+          updateUIState(data.state);
+          break;
+        default:
+          console.warn('[Webview] 未知消息类型:', data.type);
+      }
+    });
+
+    // 更新 UI 状态（按钮显示/隐藏）
+    function updateUIState(state) {
+      currentState = state;
+      
+      // 根据状态显示不同按钮
+      if (state === 'IDLE' || state === 'DONE' || state === 'ERROR' || state === 'CANCELLED') {
+        // 空闲或完成状态：显示发送按钮
+        sendBtn.style.display = 'inline-block';
+        input.disabled = false;
+        pauseBtn.style.display = 'none';
+        resumeBtn.style.display = 'none';
+        stopBtn.style.display = 'none';
+      } else if (state === 'M_RUNNING') {
+        // MLA 运行中：显示暂停和停止按钮
+        sendBtn.style.display = 'none';
+        input.disabled = true;
+        pauseBtn.style.display = 'inline-block';
+        resumeBtn.style.display = 'none';
+        stopBtn.style.display = 'inline-block';
+      } else if (state === 'PAUSED') {
+        // 暂停状态：显示继续和停止按钮
+        sendBtn.style.display = 'none';
+        input.disabled = true;
+        pauseBtn.style.display = 'none';
+        resumeBtn.style.display = 'inline-block';
+        stopBtn.style.display = 'inline-block';
+      } else if (state === 'AWAIT_HIL') {
+        // 等待 HIL：禁用所有操作
+        sendBtn.style.display = 'none';
+        input.disabled = true;
+        pauseBtn.style.display = 'none';
+        resumeBtn.style.display = 'none';
+        stopBtn.style.display = 'inline-block';
+      }
+    }
+
+    let currentAssistantDiv = null;
+    
+    // 简单 Markdown 渲染（必须在 appendMessage 之前定义）
+    function renderMarkdown(text) {
+      if (!text) {
+        console.log('[renderMarkdown] 文本为空');
+        return '';
+      }
+      
+      try {
+        console.log('[renderMarkdown] 输入:', text.substring(0, 50));
+        
+        let html = text;
+        
+        // 转义 HTML
+        const tempDiv = document.createElement('div');
+        tempDiv.textContent = html;
+        html = tempDiv.innerHTML;
+        
+        console.log('[renderMarkdown] 转义后:', html.substring(0, 50));
+        
+        // 粗体
+        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        
+        // 行内代码（使用 \\x60 代替反引号，避免与外层模板字符串冲突）
+        html = html.replace(/\\x60([^\\x60]+)\\x60/g, '<code>$1</code>');
+        
+        // 换行（\n 不是 \\n）
+        html = html.replace(/\n/g, '<br>');
+        
+        console.log('[renderMarkdown] 最终:', html.substring(0, 50));
+        
+        return html;
+      } catch (e) {
+        console.error('[renderMarkdown] 错误:', e, '输入:', text);
+        return escapeHtml(text);
+      }
+    }
+
+    function startAssistantMessage(id) {
+      const div = document.createElement('div');
+      div.id = 'assistant-' + id;
+      div.className = 'message assistant';
+      div.innerHTML = '<div class="role">🤖 助手</div>' +
+                      '<div class="content"></div>';
+      messagesDiv.appendChild(div);
+      currentAssistantDiv = div;
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    function updateAssistantMessage(id, content) {
+      const div = document.getElementById('assistant-' + id);
+      if (div) {
+        const contentDiv = div.querySelector('.content');
+        if (contentDiv) {
+          // 隐藏 XML 标签（使用字符串方法，避免正则转义问题）
+          let displayContent = content;
+          const startTag = '<mla_call>';
+          const endTag = '</mla_call>';
+          let startIdx = displayContent.indexOf(startTag);
+          while (startIdx !== -1) {
+            const endIdx = displayContent.indexOf(endTag, startIdx);
+            if (endIdx !== -1) {
+              displayContent = displayContent.substring(0, startIdx) + displayContent.substring(endIdx + endTag.length);
+              startIdx = displayContent.indexOf(startTag);
+            } else {
+              break;
+            }
+          }
+          displayContent = displayContent.trim();
+          
+          console.log('[updateAssistantMessage] 原始内容长度:', content.length);
+          console.log('[updateAssistantMessage] 去掉XML后:', displayContent.length);
+          
+          // Markdown 渲染
+          displayContent = renderMarkdown(displayContent);
+          
+          console.log('[updateAssistantMessage] Markdown渲染后:', displayContent.length);
+          
+          contentDiv.innerHTML = displayContent;
+        }
+      }
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    function appendMessage(msg) {
+      try {
+        console.log('[appendMessage] 消息角色:', msg.role, '内容长度:', msg.content?.length);
+        
+        const div = document.createElement('div');
+        div.className = 'message ' + msg.role;
+        
+        let displayContent = msg.content || '';
+        
+        // 助手消息：隐藏 XML，渲染 Markdown
+        if (msg.role === 'assistant') {
+          // 使用字符串方法代替正则，避免转义问题
+          const startTag = '<mla_call>';
+          const endTag = '</mla_call>';
+          let startIdx = displayContent.indexOf(startTag);
+          while (startIdx !== -1) {
+            const endIdx = displayContent.indexOf(endTag, startIdx);
+            if (endIdx !== -1) {
+              displayContent = displayContent.substring(0, startIdx) + displayContent.substring(endIdx + endTag.length);
+              startIdx = displayContent.indexOf(startTag);
+            } else {
+              break;
+            }
+          }
+          displayContent = displayContent.trim();
+          console.log('[appendMessage] 去掉XML后:', displayContent.substring(0, 100));
+          
+          displayContent = renderMarkdown(displayContent);
+          console.log('[appendMessage] Markdown渲染后:', displayContent.substring(0, 100));
+        } else {
+          displayContent = escapeHtml(displayContent);
+        }
+        
+        const roleText = msg.role === 'user' ? '👤 用户' : '🤖 助手';
+        div.innerHTML = '<div class="role">' + roleText + '</div>' +
+                        '<div class="content">' + displayContent + '</div>';
+        
+        messagesDiv.appendChild(div);
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      } catch (e) {
+        console.error('appendMessage 错误:', e, msg);
+      }
+    }
+
+    function appendJSONLBlock(block) {
+      const div = document.createElement('div');
+      div.id = 'block-' + block.call_id;
+      div.className = 'jsonl-block';
+      
+      const headerHTML = '<div class="jsonl-header">' +
+        '<span>🔧 执行: ' + block.agent_name + '</span>' +
+        '<span class="status-badge status-' + block.status + '">' + getStatusText(block.status) + '</span>' +
+        '</div>';
+      
+      const contentHTML = '<div class="jsonl-content" id="content-' + block.call_id + '" style="display: ' + 
+        (block.expanded ? 'block' : 'none') + '"></div>';
+      
+      div.innerHTML = headerHTML + contentHTML;
+      
+      // 添加点击事件（使用事件委托，避免 onclick 属性）
+      const header = div.querySelector('.jsonl-header');
+      header.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleBlock(block.call_id);
+      });
+      
+      messagesDiv.appendChild(div);
+      currentJSONLBlocks[block.call_id] = div;
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    function updateJSONLEvent(callId, event) {
+      const content = document.getElementById('content-' + callId);
+      if (!content) return;
+
+      const eventDiv = document.createElement('div');
+      eventDiv.className = 'jsonl-event ' + event.type;
+      
+      // 根据事件类型格式化显示
+      if (event.type === 'start') {
+        eventDiv.textContent = '🚀 任务开始: ' + (event.task || '');
+      } else if (event.type === 'token') {
+        eventDiv.textContent = event.text || '';
+      } else if (event.type === 'progress') {
+        eventDiv.textContent = '📊 ' + (event.phase || '') + ' ' + (event.pct || 0) + '%';
+      } else if (event.type === 'result') {
+        // 只显示摘要，不显示完整 JSON
+        const summary = event.summary || event.output || '';
+        const displaySummary = summary.length > 300 ? summary.substring(0, 300) + '...' : summary;
+        eventDiv.textContent = '\\n✅ 结果摘要:\\n' + displaySummary;
+        eventDiv.style.fontWeight = 'bold';
+        eventDiv.style.color = 'var(--vscode-terminal-ansiGreen)';
+        eventDiv.style.whiteSpace = 'pre-wrap';
+      } else if (event.type === 'end') {
+        const duration = event.duration_ms ? '(' + (event.duration_ms / 1000).toFixed(1) + 's)' : '';
+        eventDiv.textContent = '\\n🏁 任务完成 ' + duration;
+        eventDiv.style.fontWeight = 'bold';
+        eventDiv.style.whiteSpace = 'pre-wrap';
+      } else if (event.type === 'resume_marker') {
+        // 续跑分割线
+        eventDiv.innerHTML = '<hr style="border: 1px dashed var(--vscode-terminal-ansiYellow); margin: 10px 0;"><div style="text-align: center; color: var(--vscode-terminal-ansiYellow);">▼ 续跑开始 ▼</div><hr style="border: 1px dashed var(--vscode-terminal-ansiYellow); margin: 10px 0;">';
+      } else if (event.type === 'notice') {
+        eventDiv.textContent = 'ℹ️  ' + (event.text || '');
+      } else if (event.type === 'warn') {
+        eventDiv.textContent = '⚠️  ' + (event.text || '');
+      } else if (event.type === 'error') {
+        eventDiv.textContent = '❌ ' + (event.text || event.message || '');
+      } else if (event.type === 'artifact') {
+        eventDiv.textContent = '📎 产物: ' + (event.path || '');
+      } else if (event.type === 'human_in_loop') {
+        // HIL 事件 - 特殊卡片显示
+        const timeoutHTML = event.timeout ? '<div style="margin-top: 5px; color: var(--vscode-terminal-ansiYellow);">⏱ 超时: ' + event.timeout + ' 秒</div>' : '';
+        eventDiv.innerHTML = '<div style="border: 2px solid var(--vscode-terminal-ansiYellow); padding: 10px; margin: 10px 0; border-radius: 5px; background: var(--vscode-editor-inactiveSelectionBackground);">' +
+          '<div style="font-weight: bold; margin-bottom: 5px;">🤝 等待用户操作</div>' +
+          '<div style="margin-bottom: 5px;">HIL ID: ' + event.hil_id + '</div>' +
+          '<div>' + event.instruction + '</div>' +
+          timeoutHTML +
+          '<div style="margin-top: 10px; font-size: 0.9em; opacity: 0.8;">等待确认中...</div>' +
+          '</div>';
+      } else {
+        // 其他事件类型，简化显示
+        eventDiv.textContent = '[' + event.type + ']';
+        eventDiv.style.opacity = '0.5';
+      }
+      
+      content.appendChild(eventDiv);
+      content.scrollTop = content.scrollHeight;
+    }
+
+    function updateJSONLBlockStatus(block) {
+      const blockDiv = currentJSONLBlocks[block.call_id];
+      if (!blockDiv) return;
+
+      const badge = blockDiv.querySelector('.status-badge');
+      if (badge) {
+        badge.className = `status-badge status-\${block.status}`;
+        badge.textContent = getStatusText(block.status);
+      }
+
+      const content = document.getElementById(`content-\${block.call_id}`);
+      if (content) {
+        content.style.display = block.expanded ? 'block' : 'none';
+      }
+    }
+
+    function toggleBlock(callId) {
+      const contentDiv = document.getElementById('content-' + callId);
+      if (contentDiv) {
+        const isHidden = contentDiv.style.display === 'none';
+        contentDiv.style.display = isHidden ? 'block' : 'none';
+      }
+    }
+
+    function loadHistory(messages) {
+      console.log('[loadHistory] 接收到历史消息:', messages.length);
+      
+      messagesDiv.innerHTML = '';
+      messages.forEach(msg => {
+        if (msg.role === 'user' || msg.role === 'assistant') {
+          appendMessage(msg);
+          if (msg.jsonlBlock) {
+            appendJSONLBlock(msg.jsonlBlock);
+          }
+        } else if (msg.role === 'tool_meta_display') {
+          // 显示 tool_meta 的摘要信息
+          appendToolMetaSummary(msg.content);
+        }
+      });
+      
+      console.log('[loadHistory] 消息添加完成, messagesDiv.children.length:', messagesDiv.children.length);
+      console.log('[loadHistory] scrollHeight:', messagesDiv.scrollHeight);
+      
+      // 加载完历史后，立即滚动并再次确认
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      console.log('[loadHistory] 第1次滚动, scrollTop:', messagesDiv.scrollTop);
+      
+      setTimeout(() => {
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        console.log('[loadHistory] 第2次滚动(200ms), scrollTop:', messagesDiv.scrollTop, 'scrollHeight:', messagesDiv.scrollHeight);
+      }, 200);
+      
+      // 再次确认（处理异步渲染）
+      setTimeout(() => {
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        console.log('[loadHistory] 第3次滚动(500ms), scrollTop:', messagesDiv.scrollTop);
+      }, 500);
+    }
+    
+    function appendToolMetaSummary(summary) {
+      const div = document.createElement('div');
+      div.className = 'jsonl-block';
+      div.innerHTML = '<div class="jsonl-header">' +
+        '<span>🔧 执行: ' + summary.agent_name + '</span>' +
+        '<span class="status-badge status-completed">已完成</span>' +
+        '</div>' +
+        '<div class="jsonl-content" style="display: none; padding: 10px;">' +
+        '<div style="white-space: pre-wrap;">' + escapeHtml(summary.summary) + '</div>' +
+        '</div>';
+      
+      // 点击展开/折叠
+      const header = div.querySelector('.jsonl-header');
+      header.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const content = div.querySelector('.jsonl-content');
+        if (content.style.display === 'none') {
+          content.style.display = 'block';
+        } else {
+          content.style.display = 'none';
+        }
+      });
+      
+      messagesDiv.appendChild(div);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    function getStatusText(status) {
+      const map = {
+        running: '运行中',
+        completed: '已完成',
+        paused: '已暂停',
+        error: '错误'
+      };
+      return map[status] || status;
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // 初始化 UI 状态
+    updateUIState('IDLE');
+    
+    // 通知就绪
+    vscode.postMessage({ type: 'ready' });
+    
+    // 自动滚动到底部（稍作延迟确保内容加载完成）
+    setTimeout(() => {
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }, 100);
+  </script>
+</body>
+</html>

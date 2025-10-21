@@ -4,6 +4,10 @@
   "description": "VS Code 集成的 MLA Agent 聊天助手",
   "version": "0.1.0",
   "publisher": "mla",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/vscode-mla-plugin"
+  },
   "engines": {
     "vscode": "^1.80.0"
   },
@@ -27,6 +31,10 @@
       {
         "command": "mla.testConnection",
         "title": "MLA: 测试 LLM 连接"
+      },
+      {
+        "command": "mla.openSettings",
+        "title": "MLA: 打开设置"
       }
     ],
     "viewsContainers": {
@@ -43,13 +51,45 @@
         {
           "type": "webview",
           "id": "mla.chatView",
-          "name": "MLA 对话"
+          "name": "对话",
+          "visibility": "visible"
+        },
+        {
+          "type": "webview",
+          "id": "mla.settingsView",
+          "name": "设置",
+          "visibility": "collapsed"
         }
       ]
     },
     "configuration": {
       "title": "MLA Chatbot",
       "properties": {
+        "mla.chatbot.model": {
+          "type": "string",
+          "default": "",
+          "description": "Chatbot 模型（留空=自动，不需要 openai/ 前缀）"
+        },
+        "mla.chatbot.temperature": {
+          "type": "number",
+          "default": 0,
+          "description": "Chatbot 温度"
+        },
+        "mla.chatbot.maxContextTurns": {
+          "type": "number",
+          "default": 50,
+          "description": "上下文最大轮次"
+        },
+        "mla.history.maxMessages": {
+          "type": "number",
+          "default": 500,
+          "description": "最大历史消息数"
+        },
+        "mla.history.displayRecentCount": {
+          "type": "number",
+          "default": 0,
+          "description": "显示最近消息数（0=全部）"
+        },
         "mla.autoStartToolServer": {
           "type": "boolean",
           "default": true,
@@ -58,27 +98,30 @@
         "mla.defaultAgentName": {
           "type": "string",
           "default": "writing_agent",
-          "description": "默认 Agent 名称"
+          "description": "默认 Agent（Chatbot 会智能选择）"
         },
         "mla.jsonl.defaultExpanded": {
           "type": "boolean",
           "default": true,
           "description": "JSONL 执行区块默认展开"
         },
-        "mla.history.maxMessages": {
-          "type": "number",
-          "default": 200,
-          "description": "最大历史消息数"
-        },
         "mla.toolMeta.maxInputChars": {
           "type": "number",
           "default": 512,
-          "description": "tool_meta input 最大字符数"
+          "description": "上下文拼接 input 最大字符"
         },
         "mla.toolMeta.maxResultChars": {
           "type": "number",
-          "default": 1024,
-          "description": "tool_meta result 最大字符数"
+          "default": 0,
+          "description": "上下文拼接 result 最大字符（0=不截断）"
+        },
+        "mla.mlaModels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "MLA Agent 模型列表（需要 openai/ 前缀）"
         }
       }
     }

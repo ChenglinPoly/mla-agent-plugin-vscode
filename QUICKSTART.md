@@ -417,6 +417,179 @@ mla-agent --task_id ~/project --user_input "任务" --force-new
 
 ---
 
+## 🤝 人机交互（Human-in-Loop）
+
+### 触发场景
+
+Agent 在需要时会自动调用 `human_in_loop` 工具，暂停执行等待用户操作。
+
+### 完整示例（JSONL 模式）
+
+#### 步骤 1: Agent 触发 HIL
+
+```bash
+mla-agent \
+  --task_id ~/project \
+  --user_input "请求用户先阅读完项目内的文件再继续" \
+  --jsonl 2>/dev/null
+```
+
+**JSONL 输出**:
+```jsonl
+{"type":"start","call_id":"c-1760936557-474c43","project":"~/project","agent":"writing_agent","task":"请求用户先阅读完..."}
+{"type":"token","text":"[writing_agent] 初始规划: ..."}
+{"type":"token","text":"调用工具: dir_list\n参数: {\n  \"path\": \".\",\n  \"recursive\": true\n}"}
+{"type":"token","text":"工具 dir_list 完成: success - ..."}
+{"type":"token","text":"调用工具: human_in_loop\n参数: {\n  \"hil_id\": \"read_project_files_20251020\",\n  \"instruction\": \"请阅读完项目内的所有文件后再继续...文件清单如下：...\"\n}"}
+```
+
+**关键**: 此时 Agent 会阻塞等待，但 JSONL 事件已发出 `human_in_loop`
+
+#### 步骤 2: 用户操作（VS Code 插件处理）
+
+插件解析到 `human_in_loop` 事件后：
+- 提取 `hil_id`: `read_project_files_20251020`
+- 提取 `instruction`: "请阅读完项目内的所有文件后再继续..."
+- 显示 UI 给用户（对话框/侧边栏）
+
+#### 步骤 3: 完成 HIL 任务
+
+用户确认后，插件调用：
+
+```bash
+mla-agent confirm read_project_files_20251020 --result "已完成阅读"
+```
+
+**输出**:
+```
+✅ HIL 任务已完成: read_project_files_20251020
+   结果: 已完成阅读
+```
+
+#### 步骤 4: Agent 继续执行
+
+原 Agent 进程自动解除阻塞，继续输出 JSONL 事件：
+
+```jsonl
+{"type":"token","text":"工具 human_in_loop 完成: success - 人类任务已完成: 已完成阅读"}
+{"type":"token","text":"调用工具: final_output\n参数: {...}"}
+{"type":"result","ok":true,"summary":"任务完成..."}
+{"type":"end","status":"ok","duration_ms":58451}
+```
+
+### HIL 工具参数
+
+Agent 调用 `human_in_loop` 时的参数：
+
+```json
+{
+  "hil_id": "unique-id",          // 唯一标识
+  "instruction": "给用户的说明",   // 任务描述
+  "timeout": null                  // 超时时间（null=无限等待）
+}
+```
+
+### VS Code 插件集成代码
+
+```typescript
+// 解析 JSONL 事件
+child.stdout.on('data', (data) => {
+  data.toString().split('\n').forEach(line => {
+    if (!line.trim()) return;
+    
+    const event = JSON.parse(line);
+    
+    if (event.type === 'token' && event.text.includes('调用工具: human_in_loop')) {
+      // 提取参数（从 text 中解析或等待后续事件）
+      const match = event.text.match(/hil_id.*?:\s*"([^"]+)"/);
+      if (match) {
+        const hilId = match[1];
+        const instruction = extractInstruction(event.text);
+        
+        // 显示 UI
+        showHILDialog(hilId, instruction);
+      }
+    }
+  });
+});
+
+// 显示 HIL 对话框
+async function showHILDialog(hilId: string, instruction: string) {
+  const result = await vscode.window.showInformationMessage(
+    instruction,
+    '确认', '取消'
+  );
+  
+  // 用户确认后，完成 HIL
+  if (result === '确认') {
+    spawn('mla-agent', ['confirm', hilId, '--result', '用户已确认']);
+  } else {
+    spawn('mla-agent', ['confirm', hilId, '--result', '用户取消']);
+  }
+}
+```
+
+### 命令行测试 HIL
+
+#### 1. 手动触发 HIL（API）
+
+```bash
+curl -X POST http://localhost:8001/api/tool/execute \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task_id": "/path",
+    "tool_name": "human_in_loop",
+    "params": {
+      "hil_id": "TEST-001",
+      "instruction": "请确认是否继续"
+    }
+  }' &
+```
+
+#### 2. 查看 HIL 状态
+
+```bash
+curl http://localhost:8001/api/hil/TEST-001 | jq
+# {"found":true,"hil_id":"TEST-001","status":"waiting",...}
+```
+
+#### 3. 完成 HIL
+
+```bash
+mla-agent confirm TEST-001 --result "已确认"
+```
+
+### HIL 超时设置
+
+```json
+{
+  "hil_id": "timeout-test",
+  "instruction": "请在5分钟内确认",
+  "timeout": 300  // 5分钟后自动失败
+}
+```
+
+### 最佳实践
+
+**hil_id 命名建议**:
+```python
+# 使用时间戳 + 任务描述
+hil_id = f"upload_file_{datetime.now().strftime('%Y%m%d%H%M')}"
+hil_id = f"confirm_action_{uuid.uuid4().hex[:8]}"
+```
+
+**instruction 内容建议**:
+- 清晰说明需要用户做什么
+- 提供必要的上下文信息
+- 包含文件列表、选项等
+
+**超时设置**:
+- 文件上传：`timeout: 3600`（1小时）
+- 简单确认：`timeout: 300`（5分钟）
+- 长时间操作：`timeout: null`（无限等待）
+
+---
+
 ## 📂 文件位置
 
 ### 工作空间结构

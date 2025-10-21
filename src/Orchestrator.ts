@@ -75,15 +75,16 @@ export class Orchestrator {
     status: 'ok' | 'paused' | 'interrupted' | 'error';
   }): ToolMetaMessage {
     const maxInput = vscode.workspace.getConfiguration('mla').get('toolMeta.maxInputChars', 512);
-    const maxResult = vscode.workspace.getConfiguration('mla').get('toolMeta.maxResultChars', 1024);
+    const maxResult = vscode.workspace.getConfiguration('mla').get('toolMeta.maxResultChars', 0);
 
     const message: ToolMetaMessage = {
       role: 'tool_meta',
       agent_name: params.agentName,
       input: this.truncate(params.input, maxInput),
       call_id: params.callId,
+      // maxResult = 0 表示不截断，完整保存
       final_result_summary: params.finalResultSummary 
-        ? this.truncate(params.finalResultSummary, maxResult) 
+        ? (maxResult > 0 ? this.truncate(params.finalResultSummary, maxResult) : params.finalResultSummary)
         : undefined,
       last_agent_line: params.lastAgentLine 
         ? this.truncate(params.lastAgentLine, 512) 
@@ -116,11 +117,18 @@ export class Orchestrator {
   }
 
   /**
+   * 手动保存历史（供外部调用）
+   */
+  saveHistory(): void {
+    this.saveHistoryInternal();
+  }
+
+  /**
    * 保存运行快照
    */
   saveRunSnapshot(snapshot: any): void {
     this.history.runSnapshot = snapshot;
-    this.saveHistory();
+    this.saveHistoryInternal();
   }
 
   /**
@@ -128,12 +136,13 @@ export class Orchestrator {
    */
   updateLastState(state: any): void {
     this.history.lastState = state;
-    this.saveHistory();
+    this.saveHistoryInternal();
   }
 
   /**
-   * 构建上下文（用于 LLM 调用 - 未来扩展）
+   * 构建上下文（用于 LLM 调用）
    * 仅包含: user/assistant 内容 + tool_meta 极简摘要
+   * 限制轮次数（根据配置）
    */
   buildContext(): any[] {
     const context: any[] = [];
@@ -152,23 +161,21 @@ export class Orchestrator {
       } else if (msg.role === 'tool_meta') {
         // 极简拼接：只保留关键信息
         const meta = msg as ToolMetaMessage;
-        let toolSummary = `[调用 ${meta.agent_name}]\n输入: ${meta.input}\n`;
         
+        // 只保留结果，不要格式化文本（避免 Chatbot 重复输出）
         if (meta.final_result_summary) {
-          toolSummary += `结果: ${meta.final_result_summary}\n`;
+          context.push({
+            role: 'user',  // 改为 user 角色，表示这是"工具执行的结果"
+            content: `[系统] Agent "${meta.agent_name}" 执行结果：\n${meta.final_result_summary}`
+          });
         }
-        
-        if (meta.last_agent_line) {
-          toolSummary += `锚点: ${meta.last_agent_line}\n`;
-        }
-        
-        toolSummary += `状态: ${meta.status}`;
-
-        context.push({
-          role: 'assistant',
-          content: toolSummary
-        });
       }
+    }
+
+    // 限制上下文轮次（根据配置）
+    const maxTurns = vscode.workspace.getConfiguration('mla').get('chatbot.maxContextTurns', 20);
+    if (maxTurns > 0 && context.length > maxTurns) {
+      return context.slice(-maxTurns);
     }
 
     return context;
@@ -176,19 +183,7 @@ export class Orchestrator {
 
   // ========== 私有方法 ==========
 
-  private loadHistory(): void {
-    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-    if (!workspaceFolder) return;
-
-    const key = `mla.history.${this.getWorkspaceHash(workspaceFolder.uri.fsPath)}`;
-    const saved = this.context.workspaceState.get<ConversationHistory>(key);
-    
-    if (saved) {
-      this.history = saved;
-    }
-  }
-
-  private saveHistory(): void {
+  private saveHistoryInternal(): void {
     const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
     if (!workspaceFolder) return;
 
@@ -201,6 +196,18 @@ export class Orchestrator {
 
     const key = `mla.history.${this.getWorkspaceHash(workspaceFolder.uri.fsPath)}`;
     this.context.workspaceState.update(key, this.history);
+  }
+
+  private loadHistory(): void {
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (!workspaceFolder) return;
+
+    const key = `mla.history.${this.getWorkspaceHash(workspaceFolder.uri.fsPath)}`;
+    const saved = this.context.workspaceState.get<ConversationHistory>(key);
+    
+    if (saved) {
+      this.history = saved;
+    }
   }
 
   private getWorkspaceHash(path: string): string {

@@ -15,7 +15,7 @@ export type AgentState =
 
 // JSONL 事件类型
 export interface JSONLEvent {
-  type: 'start' | 'token' | 'progress' | 'artifact' | 'notice' | 'warn' | 'error' | 'result' | 'end' | 'human_in_loop';
+  type: 'start' | 'token' | 'progress' | 'artifact' | 'notice' | 'warn' | 'error' | 'result' | 'end' | 'human_in_loop' | 'resume_marker' | 'meta_summary';
   [key: string]: any;
 }
 
