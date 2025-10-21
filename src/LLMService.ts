@@ -19,6 +19,14 @@ interface LLMConfig {
  */
 export class LLMService {
   private config?: LLMConfig;
+  
+  /**
+   * 配置加载 Promise
+   * 用于在首次调用 chat 方法时等待配置加载完成
+   * 解决异步加载导致的配置未就绪问题
+   */
+  private configLoadPromise?: Promise<void>;
+  
   private systemPrompt = `你是 MLA Chatbot，一个集成在 VS Code 中的 AI 科研助手。
 ## 你的能力
 
@@ -92,7 +100,13 @@ export class LLMService {
 第3次（收到结果后）：输出总结，不再调用`;
 
   constructor(private readonly outputChannel: vscode.OutputChannel) {
-    this.loadConfig();
+    /**
+     * 启动配置加载（异步，但不阻塞构造函数）
+     * 
+     * 原因：构造函数不能是 async，所以我们在这里启动异步加载，
+     * 并在首次调用 chat() 时等待加载完成
+     */
+    this.configLoadPromise = this.loadConfig();
   }
 
   /**
@@ -195,8 +209,25 @@ export class LLMService {
    * 调用 LLM（流式）
    */
   async *chat(messages: Array<{role: string, content: string}>): AsyncGenerator<string> {
+    /**
+     * 等待配置加载完成
+     * 
+     * 修复原因：之前在构造函数中调用 loadConfig() 是异步的，
+     * 如果用户立即发送消息，可能配置还未加载完成，导致报错
+     * 
+     * 解决方案：在首次调用时等待配置加载完成，确保配置已就绪
+     */
+    if (this.configLoadPromise) {
+      await this.configLoadPromise;
+      this.configLoadPromise = undefined;
+    }
+    
     if (!this.config) {
-      yield '⚠️ LLM 配置未加载，请确保已设置 API Key';
+      yield '⚠️ LLM 配置未加载，请确保已设置 API Key\n\n';
+      yield '请检查：\n';
+      yield '1. 是否已安装 MLA V3\n';
+      yield '2. 是否已配置 API Key：mla-agent --config-set api_key "YOUR_KEY"\n';
+      yield '3. 在输出面板中查看详细错误信息（查看 -> 输出 -> MLA Chatbot）';
       return;
     }
 
@@ -439,7 +470,30 @@ export class LLMService {
    */
   private runCommand(cmd: string, args: string[]): Promise<string> {
     return new Promise((resolve, reject) => {
-      const proc = spawn(cmd, args);
+      /**
+       * 使用 mla-agent 的完整路径
+       * 
+       * 修复原因：VSCode 启动的子进程不会继承 conda 环境，
+       * 直接使用 'mla-agent' 命令会因为不在 PATH 中而找不到
+       * 
+       * 解决方案：使用 qwen3 环境中 mla-agent 的完整绝对路径
+       * 
+       * 注意：如果 mla-agent 安装在其他环境，需要修改此路径
+       */
+      const possiblePaths = [
+        '/home/colin/miniconda3/envs/qwen3/bin/mla-agent',  // qwen3 环境路径
+        cmd  // 原始命令（作为后备，如果已在 PATH 中）
+      ];
+      
+      let finalCmd = cmd;
+      if (cmd === 'mla-agent') {
+        // 优先使用 qwen3 环境中的完整路径
+        finalCmd = possiblePaths[0];
+      }
+      
+      this.outputChannel.appendLine(`[LLM] 执行命令: ${finalCmd} ${args.join(' ')}`);
+      
+      const proc = spawn(finalCmd, args);
       let output = '';
       let error = '';
 
@@ -455,11 +509,15 @@ export class LLMService {
         if (code === 0) {
           resolve(output);
         } else {
+          this.outputChannel.appendLine(`[LLM] 命令执行失败 (code ${code}): ${error}`);
           reject(new Error(error || `Command failed with code ${code}`));
         }
       });
 
-      proc.on('error', reject);
+      proc.on('error', (err) => {
+        this.outputChannel.appendLine(`[LLM] 命令执行错误: ${err.message}`);
+        reject(err);
+      });
     });
   }
 
